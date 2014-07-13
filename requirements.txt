@@ -1,0 +1,14 @@
+Flask==0.10.1
+Flask-HTTPAuth==2.2.1
+Flask-SQLAlchemy==1.0
+Jinja2==2.7.3
+MarkupSafe==0.23
+Pygments==1.6
+SQLAlchemy==0.9.6
+Werkzeug==0.9.6
+coverage==3.7.1
+httpie==0.8.0
+itsdangerous==0.24
+python-dateutil==2.2
+requests==2.3.0
+six==1.7.3
