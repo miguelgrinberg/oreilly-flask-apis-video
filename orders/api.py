@@ -3,7 +3,8 @@ from datetime import datetime
 from dateutil import parser as datetime_parser
 from dateutil.tz import tzutc
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask import Flask, url_for, jsonify, request, g
+from itsdangerous import TimedJSONWebSignatureSerializer as Serializer
+from flask import Flask, url_for, jsonify, request, g, Blueprint, current_app
 from flask.ext.sqlalchemy import SQLAlchemy
 from flask.ext.httpauth import HTTPBasicAuth
 from utils import split_url
@@ -13,10 +14,13 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 db_path = os.path.join(basedir, '../data.sqlite')
 
 app = Flask(__name__)
+api = Blueprint('api', __name__)
+app.config['SECRET_KEY'] = 'top-secret!'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + db_path
 
 db = SQLAlchemy(app)
 auth = HTTPBasicAuth()
+auth_token = HTTPBasicAuth()
 
 class ValidationError(ValueError):
     pass
@@ -63,6 +67,19 @@ class User(db.Model):
     def verify_password(self, password):
         return check_password_hash(self.password_hash, password)
 
+    def generate_auth_token(self, expires_in=3600):
+        s = Serializer(current_app.config['SECRET_KEY'], expires_in=expires_in)
+        return s.dumps({'id': self.id}).decode('utf-8')
+
+    @staticmethod
+    def verify_auth_token(token):
+        s = Serializer(current_app.config['SECRET_KEY'])
+        try:
+            data = s.loads(token)
+        except:
+            return None
+        return User.query.get(data['id'])
+
 
 class Customer(db.Model):
     __tablename__ = 'customers'
@@ -71,13 +88,13 @@ class Customer(db.Model):
     orders = db.relationship('Order', backref='customer', lazy='dynamic')
 
     def get_url(self):
-        return url_for('get_customer', id=self.id, _external=True)
+        return url_for('api.get_customer', id=self.id, _external=True)
 
     def export_data(self):
         return {
             'self_url': self.get_url(),
             'name': self.name,
-            'orders_url': url_for('get_customer_orders', id=self.id,
+            'orders_url': url_for('api.get_customer_orders', id=self.id,
                                   _external=True)
         }
 
@@ -96,7 +113,7 @@ class Product(db.Model):
     items = db.relationship('Item', backref='product', lazy='dynamic')
 
     def get_url(self):
-        return url_for('get_product', id=self.id, _external=True)
+        return url_for('api.get_product', id=self.id, _external=True)
 
     def export_data(self):
         return {
@@ -122,14 +139,14 @@ class Order(db.Model):
                             cascade='all, delete-orphan')
 
     def get_url(self):
-        return url_for('get_order', id=self.id, _external=True)
+        return url_for('api.get_order', id=self.id, _external=True)
 
     def export_data(self):
         return {
             'self_url': self.get_url(),
             'customer_url': self.customer.get_url(),
             'date': self.date.isoformat() + 'Z',
-            'items_url': url_for('get_order_items', id=self.id,
+            'items_url': url_for('api.get_order_items', id=self.id,
                                  _external=True)
         }
 
@@ -151,7 +168,7 @@ class Item(db.Model):
     quantity = db.Column(db.Integer)
 
     def get_url(self):
-        return url_for('get_item', id=self.id, _external=True)
+        return url_for('api.get_item', id=self.id, _external=True)
 
     def export_data(self):
         return {
@@ -167,7 +184,7 @@ class Item(db.Model):
             self.quantity = int(data['quantity'])
         except KeyError as e:
             raise ValidationError('Invalid order: missing ' + e.args[0])
-        if endpoint != 'get_product' or not 'id' in args:
+        if endpoint != 'api.get_product' or not 'id' in args:
             raise ValidationError('Invalid product URL: ' +
                                   data['product_url'])
         self.product = Product.query.get(args['id'])
@@ -184,11 +201,6 @@ def verify_password(username, password):
         return False
     return g.user.verify_password(password)
 
-@app.before_request
-@auth.login_required
-def before_request():
-    pass
-
 @auth.error_handler
 def unauthorized():
     response = jsonify({'status': 401, 'error': 'unauthorized',
@@ -196,17 +208,40 @@ def unauthorized():
     response.status_code = 401
     return response
 
+@auth_token.verify_password
+def verify_auth_token(token, unused):
+    g.user = User.verify_auth_token(token)
+    return g.user is not None
 
-@app.route('/customers/', methods=['GET'])
+@auth_token.error_handler
+def unauthorized_token():
+    response = jsonify({'status': 401, 'error': 'unauthorized',
+                        'message': 'please send your authentication token'})
+    response.status_code = 401
+    return response
+
+@api.before_request
+@auth_token.login_required
+def before_request():
+    pass
+
+
+@app.route('/get-auth-token')
+@auth.login_required
+def get_auth_token():
+    return jsonify({'token': g.user.generate_auth_token()})
+
+
+@api.route('/customers/', methods=['GET'])
 def get_customers():
     return jsonify({'customers': [customer.get_url() for customer in
                                   Customer.query.all()]})
 
-@app.route('/customers/<int:id>', methods=['GET'])
+@api.route('/customers/<int:id>', methods=['GET'])
 def get_customer(id):
     return jsonify(Customer.query.get_or_404(id).export_data())
 
-@app.route('/customers/', methods=['POST'])
+@api.route('/customers/', methods=['POST'])
 def new_customer():
     customer = Customer()
     customer.import_data(request.json)
@@ -214,7 +249,7 @@ def new_customer():
     db.session.commit()
     return jsonify({}), 201, {'Location': customer.get_url()}
 
-@app.route('/customers/<int:id>', methods=['PUT'])
+@api.route('/customers/<int:id>', methods=['PUT'])
 def edit_customer(id):
     customer = Customer.query.get_or_404(id)
     customer.import_data(request.json)
@@ -223,16 +258,16 @@ def edit_customer(id):
     return jsonify({})
 
 
-@app.route('/products/', methods=['GET'])
+@api.route('/products/', methods=['GET'])
 def get_products():
     return jsonify({'products': [product.get_url() for product in
                                  Product.query.all()]})
 
-@app.route('/products/<int:id>', methods=['GET'])
+@api.route('/products/<int:id>', methods=['GET'])
 def get_product(id):
     return jsonify(Product.query.get_or_404(id).export_data())
 
-@app.route('/products/', methods=['POST'])
+@api.route('/products/', methods=['POST'])
 def new_product():
     product = Product()
     product.import_data(request.json)
@@ -240,7 +275,7 @@ def new_product():
     db.session.commit()
     return jsonify({}), 201, {'Location': product.get_url()}
 
-@app.route('/products/<int:id>', methods=['PUT'])
+@api.route('/products/<int:id>', methods=['PUT'])
 def edit_product(id):
     product = Product.query.get_or_404(id)
     product.import_data(request.json)
@@ -249,22 +284,21 @@ def edit_product(id):
     return jsonify({})
 
 
-
-@app.route('/orders/', methods=['GET'])
+@api.route('/orders/', methods=['GET'])
 def get_orders():
     return jsonify({'orders': [order.get_url() for order in Order.query.all()]})
 
-@app.route('/customers/<int:id>/orders/', methods=['GET'])
+@api.route('/customers/<int:id>/orders/', methods=['GET'])
 def get_customer_orders(id):
     customer = Customer.query.get_or_404(id)
     return jsonify({'orders': [order.get_url() for order in
                                customer.orders.all()]})
 
-@app.route('/orders/<int:id>', methods=['GET'])
+@api.route('/orders/<int:id>', methods=['GET'])
 def get_order(id):
     return jsonify(Order.query.get_or_404(id).export_data())
 
-@app.route('/customers/<int:id>/orders/', methods=['POST'])
+@api.route('/customers/<int:id>/orders/', methods=['POST'])
 def new_customer_order(id):
     customer = Customer.query.get_or_404(id)
     order = Order(customer=customer)
@@ -273,7 +307,7 @@ def new_customer_order(id):
     db.session.commit()
     return jsonify({}), 201, {'Location': order.get_url()}
 
-@app.route('/orders/<int:id>', methods=['PUT'])
+@api.route('/orders/<int:id>', methods=['PUT'])
 def edit_order(id):
     order = Order.query.get_or_404(id)
     order.import_data(request.json)
@@ -281,7 +315,7 @@ def edit_order(id):
     db.session.commit()
     return jsonify({})
 
-@app.route('/orders/<int:id>', methods=['DELETE'])
+@api.route('/orders/<int:id>', methods=['DELETE'])
 def delete_order(id):
     order = Order.query.get_or_404(id)
     db.session.delete(order)
@@ -289,16 +323,16 @@ def delete_order(id):
     return jsonify({})
 
 
-@app.route('/orders/<int:id>/items/', methods=['GET'])
+@api.route('/orders/<int:id>/items/', methods=['GET'])
 def get_order_items(id):
     order = Order.query.get_or_404(id)
     return jsonify({'items': [item.get_url() for item in order.items.all()]})
 
-@app.route('/items/<int:id>', methods=['GET'])
+@api.route('/items/<int:id>', methods=['GET'])
 def get_item(id):
     return jsonify(Item.query.get_or_404(id).export_data())
 
-@app.route('/orders/<int:id>/items/', methods=['POST'])
+@api.route('/orders/<int:id>/items/', methods=['POST'])
 def new_order_item(id):
     order = Order.query.get_or_404(id)
     item = Item(order=order)
@@ -307,7 +341,7 @@ def new_order_item(id):
     db.session.commit()
     return jsonify({}), 201, {'Location': item.get_url()}
 
-@app.route('/items/<int:id>', methods=['PUT'])
+@api.route('/items/<int:id>', methods=['PUT'])
 def edit_item(id):
     item = Item.query.get_or_404(id)
     item.import_data(request.json)
@@ -315,12 +349,14 @@ def edit_item(id):
     db.session.commit()
     return jsonify({})
 
-@app.route('/items/<int:id>', methods=['DELETE'])
+@api.route('/items/<int:id>', methods=['DELETE'])
 def delete_item(id):
     item = Item.query.get_or_404(id)
     db.session.delete(item)
     db.session.commit()
     return jsonify({})
+
+app.register_blueprint(api)
 
 if __name__ == '__main__':
     db.create_all()
