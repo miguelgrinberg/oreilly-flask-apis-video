@@ -1,21 +1,16 @@
-import coverage
-COV = coverage.coverage(branch=True, include='api*')
-COV.start()
-
-import os
-os.environ['DATABASE_URL'] = 'sqlite:///../test.sqlite'
-
 import unittest
 from werkzeug.exceptions import NotFound
-from api import app, db, User
-from test_client import TestClient
+from app import create_app, db
+from app.models import User
+from .test_client import TestClient
+
 
 class TestAPI(unittest.TestCase):
     default_username = 'dave'
     default_password = 'cat'
 
     def setUp(self):
-        self.app = app
+        self.app = create_app('testing')
         self.ctx = self.app.app_context()
         self.ctx.push()
         db.drop_all()
@@ -33,18 +28,19 @@ class TestAPI(unittest.TestCase):
 
     def test_customers(self):
         # get list of customers
-        rv, json = self.client.get('/customers/')
+        rv, json = self.client.get('/api/v1/customers/')
         self.assertTrue(rv.status_code == 200)
         self.assertTrue(json['customers'] == [])
 
         # add a customer
-        rv, json = self.client.post('/customers/', data={'name': 'john'})
+        rv, json = self.client.post('/api/v1/customers/',
+                                    data={'name': 'john'})
         self.assertTrue(rv.status_code == 201)
         location = rv.headers['Location']
         rv, json = self.client.get(location)
         self.assertTrue(rv.status_code == 200)
         self.assertTrue(json['name'] == 'john')
-        rv, json = self.client.get('/customers/')
+        rv, json = self.client.get('/api/v1/customers/')
         self.assertTrue(rv.status_code == 200)
         self.assertTrue(json['customers'] == [location])
 
@@ -57,19 +53,19 @@ class TestAPI(unittest.TestCase):
 
     def test_products(self):
         # get list of products
-        rv, json = self.client.get('/products/')
+        rv, json = self.client.get('/api/v1/products/')
         self.assertTrue(rv.status_code == 200)
         self.assertTrue(json['products'] == [])
 
         # add a customer
-        rv, json = self.client.post('/products/',
+        rv, json = self.client.post('/api/v1/products/',
                                     data={'name': 'prod1'})
         self.assertTrue(rv.status_code == 201)
         location = rv.headers['Location']
         rv, json = self.client.get(location)
         self.assertTrue(rv.status_code == 200)
         self.assertTrue(json['name'] == 'prod1')
-        rv, json = self.client.get('/products/')
+        rv, json = self.client.get('/api/v1/products/')
         self.assertTrue(rv.status_code == 200)
         self.assertTrue(json['products'] == [location])
 
@@ -82,7 +78,7 @@ class TestAPI(unittest.TestCase):
 
     def test_orders_and_items(self):
         # define a customer
-        rv, json = self.client.post('/customers/',
+        rv, json = self.client.post('/api/v1/customers/',
                                     data={'name': 'john'})
         self.assertTrue(rv.status_code == 201)
         customer = rv.headers['Location']
@@ -93,11 +89,11 @@ class TestAPI(unittest.TestCase):
         self.assertTrue(json['orders'] == [])
 
         # define two products
-        rv, json = self.client.post('/products/',
+        rv, json = self.client.post('/api/v1/products/',
                                     data={'name': 'prod1'})
         self.assertTrue(rv.status_code == 201)
         prod1 = rv.headers['Location']
-        rv, json = self.client.post('/products/',
+        rv, json = self.client.post('/api/v1/products/',
                                     data={'name': 'prod2'})
         self.assertTrue(rv.status_code == 201)
         prod2 = rv.headers['Location']
@@ -112,7 +108,7 @@ class TestAPI(unittest.TestCase):
         rv, json = self.client.get(items_url)
         self.assertTrue(rv.status_code == 200)
         self.assertTrue(json['items'] == [])
-        rv, json = self.client.get('/orders/')
+        rv, json = self.client.get('/api/v1/orders/')
         self.assertTrue(rv.status_code == 200)
         self.assertTrue(len(json['orders']) == 1)
         self.assertTrue(order in json['orders'])
@@ -172,12 +168,6 @@ class TestAPI(unittest.TestCase):
         self.assertTrue(rv.status_code == 200)
         with self.assertRaises(NotFound):
             rv, json = self.client.get(item2)
-        rv, json = self.client.get('/orders/')
+        rv, json = self.client.get('/api/v1/orders/')
         self.assertTrue(rv.status_code == 200)
         self.assertTrue(len(json['orders']) == 0)
-
-if __name__ == '__main__':
-    suite = unittest.TestLoader().loadTestsFromTestCase(TestAPI)
-    unittest.TextTestRunner(verbosity=2).run(suite)
-    COV.stop()
-    COV.report()
