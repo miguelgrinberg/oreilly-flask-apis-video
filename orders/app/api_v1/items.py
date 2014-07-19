@@ -2,14 +2,15 @@ from flask import request
 from . import api
 from .. import db
 from ..models import Order, Item
-from ..decorators import json
+from ..decorators import json, paginate
 
 
 @api.route('/orders/<int:id>/items/', methods=['GET'])
 @json
+@paginate('items')
 def get_order_items(id):
     order = Order.query.get_or_404(id)
-    return {'items': [item.get_url() for item in order.items.all()]}
+    return order.items
 
 @api.route('/items/<int:id>', methods=['GET'])
 @json
