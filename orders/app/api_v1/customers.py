@@ -2,14 +2,14 @@ from flask import request
 from . import api
 from .. import db
 from ..models import Customer
-from ..decorators import json
+from ..decorators import json, paginate
 
 
 @api.route('/customers/', methods=['GET'])
 @json
+@paginate('customers')
 def get_customers():
-    return {'customers': [customer.get_url() for customer in
-                          Customer.query.all()]}
+    return Customer.query
 
 @api.route('/customers/<int:id>', methods=['GET'])
 @json
