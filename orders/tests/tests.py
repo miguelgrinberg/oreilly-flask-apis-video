@@ -1,7 +1,7 @@
 import unittest
 from werkzeug.exceptions import NotFound
 from app import create_app, db
-from app.models import User
+from app.models import User, Customer
 from .test_client import TestClient
 
 
@@ -171,3 +171,58 @@ class TestAPI(unittest.TestCase):
         rv, json = self.client.get('/api/v1/orders/')
         self.assertTrue(rv.status_code == 200)
         self.assertTrue(len(json['orders']) == 0)
+
+    def test_pagination(self):
+        # define 55 customers (3 pages at 25 per page)
+        customers = []
+        for i in range(0, 55):
+            customers.append(Customer(name='customer_{0:02d}'.format(i)))
+        db.session.add_all(customers)
+        db.session.commit()
+
+        # get first page of customer list
+        rv, json = self.client.get('/api/v1/customers/')
+        self.assertTrue(rv.status_code == 200)
+        self.assertTrue(len(json['customers']) == 25)
+        self.assertTrue('pages' in json)
+        self.assertIsNone(json['pages']['prev_url'])
+        self.assertTrue(json['customers'][0] == customers[0].get_url())
+        self.assertTrue(json['customers'][-1] == customers[24].get_url())
+        page1_url = json['pages']['first_url']
+        page2_url = json['pages']['next_url']
+
+        # get second page of customer list
+        rv, json = self.client.get(page2_url)
+        self.assertTrue(rv.status_code == 200)
+        self.assertTrue(len(json['customers']) == 25)
+        self.assertTrue(json['customers'][0] == customers[25].get_url())
+        self.assertTrue(json['customers'][-1] == customers[49].get_url())
+        self.assertTrue(page1_url == json['pages']['prev_url'])
+        page3_url = json['pages']['next_url']
+        self.assertTrue(page3_url == json['pages']['last_url'])
+
+        # get third page of customer list
+        rv, json = self.client.get(page3_url)
+        self.assertTrue(rv.status_code == 200)
+        self.assertTrue(len(json['customers']) == 5)
+        self.assertTrue(json['customers'][0] == customers[50].get_url())
+        self.assertTrue(json['customers'][-1] == customers[54].get_url())
+        self.assertTrue(json['pages']['prev_url'] == page2_url)
+        self.assertIsNone(json['pages']['next_url'])
+
+        # get second page, with expanded results
+        rv, json = self.client.get(page2_url + '&expanded=1')
+        self.assertTrue(rv.status_code == 200)
+        self.assertTrue(len(json['customers']) == 25)
+        self.assertTrue(json['customers'][0]['name'] == customers[25].name)
+        self.assertTrue(json['customers'][0]['self_url'] ==
+                        customers[25].get_url())
+        self.assertTrue(json['customers'][-1]['name'] == customers[49].name)
+        page1_url_expanded = json['pages']['prev_url']
+
+        # get first page expanded, using previous link from page 2
+        rv, json = self.client.get(page1_url_expanded)
+        self.assertTrue(rv.status_code == 200)
+        self.assertTrue(len(json['customers']) == 25)
+        self.assertTrue(json['customers'][0]['name'] == customers[0].name)
+        self.assertTrue(json['customers'][24]['name'] == customers[24].name)
