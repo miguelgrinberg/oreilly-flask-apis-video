@@ -22,6 +22,9 @@ def paginate(collection, max_per_page=25):
             page = request.args.get('page', 1, type=int)
             per_page = min(request.args.get('per_page', max_per_page,
                                             type=int), max_per_page)
+            expanded = None
+            if request.args.get('expanded', 0, type=int) != 0:
+                expanded = 1
 
             # run the query with Flask-SQLAlchemy's pagination
             p = query.paginate(page, per_page)
@@ -32,24 +35,31 @@ def paginate(collection, max_per_page=25):
             if p.has_prev:
                 pages['prev_url'] = url_for(request.endpoint, page=p.prev_num,
                                             per_page=per_page,
-                                            _external=True, **kwargs)
+                                            expanded=expanded, _external=True,
+                                            **kwargs)
             else:
                 pages['prev_url'] = None
             if p.has_next:
                 pages['next_url'] = url_for(request.endpoint, page=p.next_num,
                                             per_page=per_page,
-                                            _external=True, **kwargs)
+                                            expanded=expanded, _external=True,
+                                            **kwargs)
             else:
                 pages['next_url'] = None
             pages['first_url'] = url_for(request.endpoint, page=1,
-                                         per_page=per_page, _external=True,
-                                         **kwargs)
+                                         per_page=per_page, expanded=expanded,
+                                         _external=True, **kwargs)
             pages['last_url'] = url_for(request.endpoint, page=p.pages,
-                                        per_page=per_page, _external=True,
-                                        **kwargs)
+                                        per_page=per_page, expanded=expanded,
+                                        _external=True, **kwargs)
+
+            # generate the paginated collection as a dictionary
+            if expanded:
+                results = [item.export_data() for item in p.items]
+            else:
+                results = [item.get_url() for item in p.items]
 
             # return a dictionary as a response
-            return {collection: [item.get_url() for item in p.items],
-                    'pages': pages}
+            return {collection: results, 'pages': pages}
         return wrapped
     return decorator
