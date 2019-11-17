@@ -10,5 +10,5 @@ coverage==3.7.1
 httpie==0.8.0
 itsdangerous==0.24
 python-dateutil==2.2
-requests==2.3.0
+requests==2.20.0
 six==1.7.3
