@@ -5,7 +5,7 @@ Jinja2==2.7.3
 MarkupSafe==0.23
 Pygments==1.6
 SQLAlchemy==0.9.6
-Werkzeug==0.9.6
+Werkzeug==0.15.3
 coverage==3.7.1
 httpie==0.8.0
 itsdangerous==0.24
