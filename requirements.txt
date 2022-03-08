@@ -7,7 +7,7 @@ Pygments==1.6
 SQLAlchemy==0.9.6
 Werkzeug==0.9.6
 coverage==3.7.1
-httpie==0.8.0
+httpie==3.1.0
 itsdangerous==0.24
 python-dateutil==2.2
 requests==2.3.0
